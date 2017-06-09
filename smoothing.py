@@ -29,15 +29,21 @@ class Smooth:
             
             
     def begin_smooth(self):
+        
+        self.alpha = 0.1
         col_list = ['fcst_id', 'flight_dep_date', 'lcl_flw_ind', 
                     'fcst_cls', 'fcst_prd', 'td', 'id']
                     
-        for key in zip(self.key_id, np.arange(1,8)):
-            self.raw_key = self.raw_all.query("fcst_id == {0} & lcl_flw_ind == '{1}' & fcst_prd == {2}".format(
-                                              key[0][0], key[0][1], key[1] ))[col_list]
+        for key in zip(self.key_id, np.arange(1,8), np.arange(1,8)):
+            self.raw_key = self.raw_all.query("fcst_id == {0} & lcl_flw_ind == '{1}' & fcst_prd == {2} & dow = {3}".format(
+                                              key[0][0], key[0][1], key[1] , key[2]))[col_list]
             
-            raw_id
-            new = pd.concat([raw_key, new_id], axis = 1)
+            
+            self.raw_key = self.raw_key.pivot(index='flight_dep_date', columns='fcst_cls', values='td')
+            self.smooth_initial()
+            
+            self.outlier_removal()
+            
 #            seprate raw id and raw td and transpose cls into columns
             
     def load_from_database(self, dirmkt):
@@ -66,11 +72,18 @@ class Smooth:
         self.raw_all.dropna(axis = 0, subset =['tt', 'it', 'td', 'id', 'seas_index'], inplace = True )
         self.raw_all.eval('td = td /seas_index', inplace =True)
         self.raw_all.eval('id = id /seas_index', inplace =True)
-        self.raw_all.sort_values()
+        self.raw_all.sort_values([ 'fcst_id', 'lcl_flw_ind', 'fcst_prd', 'fcst_cls','flight_dep_date'], inplace = True)
         
     def smooth_initial(self):
-        pass     
-
+        if self.raw_key.shape[0] >= 10:
+#            create x matrix for actual values
+            self.x_matrix = self.raw_key.as_matrix()
+#            create s matrix for smoothed values
+            self.s_matrix = np.zeros((self.x_matrix.shape[0], self.x_matrix.shape[1] + 1))
+#            add order/index to the s matrix
+            self.s_matrix[:,0] = np.arange(self.x_matrix.shape[0])
+            
+            
     def outlier_removal(self):
         pass
     
