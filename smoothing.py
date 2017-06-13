@@ -35,7 +35,7 @@ class Smooth:
                     'fcst_cls', 'fcst_prd', 'td', 'id']
                     
         for key in zip(self.key_id, np.arange(1,8), np.arange(1,8)):
-            self.raw_key = self.raw_all.query("fcst_id == {0} & lcl_flw_ind == '{1}' & fcst_prd == {2} & dow = {3}".format(
+            self.raw_key = self.raw_all.query("fcst_id == {0} & lcl_flw_ind == '{1}' & fcst_prd == {2} & dow == {3}".format(
                                               key[0][0], key[0][1], key[1] , key[2]))[col_list]
             
             
@@ -75,18 +75,69 @@ class Smooth:
         self.raw_all.sort_values([ 'fcst_id', 'lcl_flw_ind', 'fcst_prd', 'fcst_cls','flight_dep_date'], inplace = True)
         
     def smooth_initial(self):
+        
         if self.raw_key.shape[0] >= 10:
-#            create x matrix for actual values
-            self.x_matrix = self.raw_key.as_matrix()
-#            create s matrix for smoothed values
-            self.s_matrix = np.zeros((self.x_matrix.shape[0], self.x_matrix.shape[1] + 1))
-#            add order/index to the s matrix
-            self.s_matrix[:,0] = np.arange(self.x_matrix.shape[0])
             
+            s_key = self.raw_key.copy()
+            for column in s_key:
+                s_key[column][0] = s_key[column][:10].mean()
+                s_key.rename(columns = {column : str(column) + 's' }, inplace = True)
+            s_key[1:] = 0
+
+            self.xs_key = pd.concat([self.raw_key, s_key], axis=1)
+#            create smoothed value. pands ewm can do it
+            for r in range(1, self.xs_key.shape[0]):
+                self.xs_key.iloc[r, 10:] =  self.xs_key.iloc[r, 0:10].values * self.alpha + self.xs_key.iloc[r -1 , 10:] * (1 - self.alpha)
+            
+
             
     def outlier_removal(self):
-        pass
-    
+
+        self.d_key = self.xs_key.iloc[:,0:10] - self.xs_key.iloc[:,10:20].values
+        for column in self.d_key:
+            self.d_key[column][0] = self.d_key[column][:10].mean()
+            self.d_key.rename(columns = {column : str(column) + 'd' } , inplace = True)
+            
+#        order and set weight
+        for i in range(0, self.d_key.shape[0]):
+            weight = (1- self.alpha) ** (self.d_key.shape[0] - i)
+            self.d_key['w'][i] = weight
+#        dev 1
+        d1_key = self.d_key.copy()
+        d1_key = self.d_key.iloc[:,0:10].multiply(self.d_key['w'], axis = 'index')
+#        dev2
+        d2_key = self.d_key.copy()
+        d2_key.iloc[:, 0:10] = d2_key.iloc[:, 0:10] - d1_key.sum()/self.d_key['w'].sum()
+        d2_key.iloc[:, 0:10] = d2_key.iloc[:, 0:10] ** 2
+        d2_key.iloc[:, 0:10] = d2_key.iloc[:, 0:10].multiply(d2_key['w'], axis = 'index')
+#        weighted s.e.
+        wtd_se = np.sqrt(d2_key.iloc[:, 0:10].sum())/d2_key['w'].sum()
+#        reset index to 1s so dataframe can broadcast 
+        wtd_se = wtd_se.reset_index()
+        wtd_se['fcst_cls'] = wtd_se['fcst_cls'].apply( lambda x: x[:-1] + 's')
+        wtd_se = wtd_se.set_index('fcst_cls').squeeze()
+
+        
+#       confidence invertal
+        cu_key = self.xs_key.iloc[:, 10:] +  wtd_se * 1.5
+        cl_key = self.xs_key.iloc[:, 10:] -  wtd_se * 1.5
+        cl_key[cl_key<0] = 0
+
+#        as matrix creates view
+        x_matrix = self.raw_key.as_matrix()
+        cu_matrix = cu_key.as_matrix()
+        cl_matrix = cl_key.as_matrix()
+        
+        self.flag_matrix =  (x_matrix < cl_matrix) | (x_matrix > cu_matrix)
+        x_matrix[self.flag_matrix] = None
+        
+#            create x matrix for actual values
+#        self.x_matrix = self.raw_key.as_matrix()
+#            create s matrix for smoothed values
+#        self.s_matrix = np.zeros((self.x_matrix.shape[0], self.x_matrix.shape[1] + 1))
+#            add order/index to the s matrix
+#        self.s_matrix[:,0] = np.arange(self.x_matrix.shape[0])
+            
     def smooth_output(self):
         pass
 
